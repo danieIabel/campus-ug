@@ -72,19 +72,27 @@
   }
   const { sesskey, userId } = getPageInfo();
 
-  async function ajax(methodname, args) {
+  async function ajaxBatch(requests) {
+    const info = [...new Set(requests.map((r) => r.methodname))].join(',');
     const r = await fetch(
-      `${ORIGIN}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}&info=${encodeURIComponent(methodname)}`,
+      `${ORIGIN}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}&info=${encodeURIComponent(info)}`,
       {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([{ index: 0, methodname, args }]),
+        body: JSON.stringify(requests.map((req, index) => ({ index, methodname: req.methodname, args: req.args }))),
       }
     );
-    const j = await r.json();
-    if (j[0] && j[0].error) throw new Error((j[0].exception && j[0].exception.message) || 'Error en la API de Moodle');
-    return j[0].data;
+    const list = await r.json();
+    return list.map((res) => {
+      if (res && res.error) throw new Error((res.exception && res.exception.message) || 'Error en la API de Moodle');
+      return res.data;
+    });
+  }
+
+  async function ajax(methodname, args) {
+    const [data] = await ajaxBatch([{ methodname, args }]);
+    return data;
   }
 
   async function pool(list, n, fn) {
@@ -102,11 +110,17 @@
 
   /* ---------- obtención de eventos ---------- */
 
+  async function fetchMonths(months) {
+    const requests = months.map(([year, month]) => ({
+      methodname: 'core_calendar_get_calendar_monthly_view',
+      args: { year, month, courseid: 1, categoryid: 0, includenavigation: false, mini: false, day: 1 },
+    }));
+    const results = await ajaxBatch(requests);
+    return results.flatMap((d) => d.weeks.flatMap((w) => w.days.flatMap((day) => day.events || [])));
+  }
+
   async function fetchMonth(year, month) {
-    const d = await ajax('core_calendar_get_calendar_monthly_view', {
-      year, month, courseid: 1, categoryid: 0, includenavigation: false, mini: false, day: 1,
-    });
-    return d.weeks.flatMap((w) => w.days.flatMap((day) => day.events || []));
+    return fetchMonths([[year, month]]);
   }
 
   function toItem(ev) {
@@ -179,7 +193,7 @@
         const d = new Date(now.getFullYear(), now.getMonth() + o, 1);
         months.push([d.getFullYear(), d.getMonth() + 1]);
       }
-      const events = (await Promise.all(months.map(([y, m]) => fetchMonth(y, m)))).flat();
+      const events = await fetchMonths(months);
       const map = new Map();
       events.forEach((ev) => {
         const it = toItem(ev);
@@ -387,6 +401,20 @@
     await loadStore();
     mount();
     await load();
-    setInterval(() => { if (!state.loading) render(); }, 60000);
+
+    let lastRender = Date.now();
+    const tryRender = () => {
+      if (document.visibilityState === 'visible' && !state.loading) {
+        lastRender = Date.now();
+        render();
+      }
+    };
+
+    setInterval(tryRender, 60000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastRender >= 60000) {
+        tryRender();
+      }
+    });
   })();
 })();
