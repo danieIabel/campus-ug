@@ -43,22 +43,45 @@
   };
 
   function getPageInfo() {
-    const html = document.documentElement.innerHTML;
-    const sesskey =
-      (html.match(/"sesskey":"([A-Za-z0-9]+)"/) || [])[1] ||
-      ((document.querySelector('a[href*="logout.php?sesskey="]') || {}).href || '').split('sesskey=')[1];
-    const userId = (html.match(/"userId":(\d+)/) || [])[1];
-    return { sesskey, userId };
+    let sesskey = document.querySelector('input[name="sesskey"]')?.value;
+
+    if (!sesskey) {
+      const logoutLink = document.querySelector('a[href*="logout.php?sesskey="], a[href*="sesskey="]');
+      if (logoutLink) {
+        try {
+          sesskey = new URL(logoutLink.href, ORIGIN).searchParams.get('sesskey');
+        } catch (_) {}
+      }
+    }
+
+    let userId = null;
+    for (const script of document.scripts) {
+      const text = script.textContent;
+      if (!sesskey) {
+        const sm = text.match(/"sesskey":"([A-Za-z0-9]+)"/);
+        if (sm) sesskey = sm[1];
+      }
+      if (!userId) {
+        const um = text.match(/"userId":(\d+)/);
+        if (um) userId = um[1];
+      }
+      if (sesskey && userId) break;
+    }
+
+    return { sesskey: sesskey || '', userId };
   }
   const { sesskey, userId } = getPageInfo();
 
   async function ajax(methodname, args) {
-    const r = await fetch(`${ORIGIN}/lib/ajax/service.php?sesskey=${sesskey}&info=${methodname}`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([{ index: 0, methodname, args }]),
-    });
+    const r = await fetch(
+      `${ORIGIN}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}&info=${encodeURIComponent(methodname)}`,
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ index: 0, methodname, args }]),
+      }
+    );
     const j = await r.json();
     if (j[0] && j[0].error) throw new Error((j[0].exception && j[0].exception.message) || 'Error en la API de Moodle');
     return j[0].data;
@@ -68,7 +91,11 @@
     let i = 0;
     await Promise.all(
       Array.from({ length: Math.min(n, list.length) }, async () => {
-        while (i < list.length) await fn(list[i++]);
+        while (i < list.length) {
+          const item = list[i++];
+          await fn(item);
+          await new Promise((r) => setTimeout(r, 150));
+        }
       })
     );
   }
@@ -132,7 +159,7 @@
       return true;
     });
     let n = 0;
-    await pool(todo, 5, async (it) => {
+    await pool(todo, 3, async (it) => {
       try {
         state.store.auto[it.id] = { done: await checkDone(it), t: Date.now() };
       } catch (_) {}
