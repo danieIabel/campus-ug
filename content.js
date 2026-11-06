@@ -265,42 +265,98 @@
   function render() {
     const panel = document.getElementById('tt-panel');
     if (!panel) return;
+
     const rows = visible();
-    const counts = Object.fromEntries(TABS.map((t) => [t.id, listFor(t.id, rows).length]));
+    const counts = { proximas: 0, atrasadas: 0, entregadas: 0, pendientes: 0 };
+    for (const { b } of rows) {
+      if (b === 'proximas') {
+        counts.proximas++;
+        counts.pendientes++;
+      } else if (b === 'atrasadas') {
+        counts.atrasadas++;
+        counts.pendientes++;
+      } else if (b === 'entregadas') {
+        counts.entregadas++;
+      }
+    }
     const list = listFor(state.tab, rows);
 
-    const courses = [...new Map(state.items.map((i) => [String(i.courseId), i.course])).entries()];
+    const refreshBtn = panel.querySelector('[data-refresh]');
+    if (refreshBtn) refreshBtn.disabled = state.loading;
 
-    panel.innerHTML = `
-      <div class="tt-head">
-        <h3>Mis actividades</h3>
-        <div class="tt-tools">
-          <select data-course aria-label="Filtrar por curso">
-            <option value="all">Todos los cursos</option>
-            ${courses.map(([id, n]) => `<option value="${esc(id)}" ${state.course === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}
-          </select>
-          <button data-refresh ${state.loading ? 'disabled' : ''}>Actualizar</button>
-        </div>
-      </div>
-      <div class="tt-tabs" role="tablist">
-        ${TABS.map((t) => `
-          <button role="tab" class="${state.tab === t.id ? 'active' : ''}" data-tab="${t.id}">
-            ${t.label} <span class="tt-count tt-count-${t.id}">${counts[t.id]}</span>
-          </button>`).join('')}
-      </div>
-      ${state.progress ? `<div class="tt-note">${esc(state.progress)}</div>` : ''}
-      ${state.error ? `<div class="tt-note tt-error">${esc(state.error)}</div>` : ''}
-      ${list.length
-        ? `<ul class="tt-list">${list.map(itemHtml).join('')}</ul>`
-        : `<div class="tt-empty">${state.loading ? 'Cargando…' : 'Nada por aquí.'}</div>`}
-      <div class="tt-foot">Los foros se detectan como entregados si participaste en ellos; usa ✓ para corregir manualmente.</div>
-    `;
+    const select = panel.querySelector('select[data-course]');
+    if (select) {
+      const courses = [...new Map(state.items.map((i) => [String(i.courseId), i.course])).entries()];
+      const currentSignature = select.dataset.signature || '';
+      const nextSignature = courses.map(([id]) => id).join(',');
+      if (currentSignature !== nextSignature) {
+        select.dataset.signature = nextSignature;
+        select.innerHTML = `<option value="all">Todos los cursos</option>${courses
+          .map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`)
+          .join('')}`;
+      }
+      if (select.value !== state.course) select.value = state.course;
+    }
+
+    const tabButtons = panel.querySelectorAll('.tt-tabs [data-tab]');
+    for (const btn of tabButtons) {
+      const tid = btn.dataset.tab;
+      btn.classList.toggle('active', state.tab === tid);
+      const countEl = btn.querySelector('.tt-count');
+      if (countEl) countEl.textContent = counts[tid] ?? 0;
+    }
+
+    const statusEl = panel.querySelector('.tt-status');
+    if (statusEl) {
+      if (state.progress) {
+        statusEl.innerHTML = `<div class="tt-note">${esc(state.progress)}</div>`;
+      } else if (state.error) {
+        statusEl.innerHTML = `<div class="tt-note tt-error">${esc(state.error)}</div>`;
+      } else {
+        statusEl.textContent = '';
+      }
+    }
+
+    const contentEl = panel.querySelector('.tt-content');
+    if (contentEl) {
+      if (list.length) {
+        const existingList = contentEl.querySelector('.tt-list');
+        const itemsHtml = list.map(itemHtml).join('');
+        if (existingList) {
+          existingList.innerHTML = itemsHtml;
+        } else {
+          contentEl.innerHTML = `<ul class="tt-list">${itemsHtml}</ul>`;
+        }
+      } else {
+        contentEl.innerHTML = `<div class="tt-empty">${state.loading ? 'Cargando…' : 'Nada por aquí.'}</div>`;
+      }
+    }
   }
 
   function mount() {
     const panel = document.createElement('section');
     panel.id = 'tt-panel';
     panel.className = 'tt-panel';
+    panel.innerHTML = `
+      <div class="tt-head">
+        <h3>Mis actividades</h3>
+        <div class="tt-tools">
+          <select data-course aria-label="Filtrar por curso">
+            <option value="all">Todos los cursos</option>
+          </select>
+          <button data-refresh>Actualizar</button>
+        </div>
+      </div>
+      <div class="tt-tabs" role="tablist">
+        ${TABS.map((t) => `
+          <button role="tab" class="${state.tab === t.id ? 'active' : ''}" data-tab="${t.id}">
+            ${t.label} <span class="tt-count tt-count-${t.id}">0</span>
+          </button>`).join('')}
+      </div>
+      <div class="tt-status"></div>
+      <div class="tt-content"></div>
+      <div class="tt-foot">Los foros se detectan como entregados si participaste en ellos; usa ✓ para corregir manualmente.</div>
+    `;
 
     panel.addEventListener('click', (e) => {
       const tab = e.target.closest('[data-tab]');
