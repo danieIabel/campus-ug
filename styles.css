@@ -36,6 +36,20 @@
 .tt-tools button { cursor: pointer; }
 .tt-tools button:disabled { opacity: 0.5; cursor: default; }
 
+.tt-toggle-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--tt-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.tt-toggle-sync input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .tt-tabs {
   display: flex;
   flex-wrap: wrap;

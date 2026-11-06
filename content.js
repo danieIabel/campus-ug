@@ -26,6 +26,7 @@
     loading: true,
     progress: '',
     error: '',
+    autoSync: true,
     store: { auto: {}, manual: {} },
   };
 
@@ -39,6 +40,9 @@
       const r = await chrome.storage.local.get(STORE);
       if (r[STORE]) {
         state.store = { auto: {}, manual: {}, ...r[STORE] };
+        if (typeof r[STORE].autoSync === 'boolean') {
+          state.autoSync = r[STORE].autoSync;
+        }
         if (Array.isArray(r[STORE].items) && r[STORE].items.length > 0) {
           state.items = r[STORE].items;
           state.loading = false;
@@ -52,6 +56,7 @@
         [STORE]: {
           auto: state.store.auto,
           manual: state.store.manual,
+          autoSync: state.autoSync,
           items: state.items,
         },
       });
@@ -355,6 +360,11 @@
     const refreshBtn = panel.querySelector('[data-refresh]');
     if (refreshBtn) refreshBtn.disabled = state.loading;
 
+    const autoSyncInput = panel.querySelector('[data-auto-sync]');
+    if (autoSyncInput && autoSyncInput.checked !== state.autoSync) {
+      autoSyncInput.checked = state.autoSync;
+    }
+
     const select = panel.querySelector('select[data-course]');
     if (select) {
       const courses = [...new Map(state.items.map((i) => [String(i.courseId), i.course])).entries()];
@@ -415,6 +425,10 @@
           <select data-course aria-label="Filtrar por curso">
             <option value="all">Todos los cursos</option>
           </select>
+          <label class="tt-toggle-sync" title="Sincronizar automáticamente al visitar la página">
+            <input type="checkbox" data-auto-sync ${state.autoSync ? 'checked' : ''}>
+            <span>Auto</span>
+          </label>
           <button data-refresh>Actualizar</button>
         </div>
       </div>
@@ -450,6 +464,13 @@
     });
     panel.addEventListener('change', (e) => {
       if (e.target.matches('[data-course]')) { state.course = e.target.value; render(); }
+      if (e.target.matches('[data-auto-sync]')) {
+        state.autoSync = e.target.checked;
+        saveStore();
+        if (state.autoSync) {
+          load();
+        }
+      }
     });
 
     const ref = document.querySelector('[data-block="calendar_upcoming"], .block_calendar_upcoming');
@@ -461,7 +482,9 @@
     await loadStore();
     mount();
     render();
-    await load();
+    if (state.autoSync || state.items.length === 0) {
+      await load();
+    }
 
     let lastRender = Date.now();
     const tryRender = () => {
