@@ -106,11 +106,6 @@
     });
   }
 
-  async function ajax(methodname, args) {
-    const [data] = await ajaxBatch([{ methodname, args }]);
-    return data;
-  }
-
   async function pool(list, n, fn) {
     let i = 0;
     await Promise.all(
@@ -133,10 +128,6 @@
     }));
     const results = await ajaxBatch(requests);
     return results.flatMap((d) => d.weeks.flatMap((w) => w.days.flatMap((day) => day.events || [])));
-  }
-
-  async function fetchMonth(year, month) {
-    return fetchMonths([[year, month]]);
   }
 
   function toItem(ev) {
