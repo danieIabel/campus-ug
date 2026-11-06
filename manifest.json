@@ -6,7 +6,10 @@
   "permissions": ["storage"],
   "content_scripts": [
     {
-      "matches": ["https://*.ug.edu.ec/my/*"],
+      "matches": [
+        "https://campusvirtual2.ug.edu.ec/my/*",
+        "https://campusvirtual.ug.edu.ec/my/*"
+      ],
       "js": ["content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
