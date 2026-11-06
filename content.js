@@ -132,18 +132,15 @@
   async function checkDone(item) {
     const res = await fetch(item.url, { credentials: 'same-origin' });
     const html = await res.text();
-    const doc = new DOMParser().parseFromString(html, 'text/html');
 
     if (item.mod === 'assign') {
-      if (doc.querySelector('.submissionstatussubmitted')) return true;
-      return /Enviado para calificar|Submitted for grading/i.test(doc.body.textContent);
+      return html.includes('submissionstatussubmitted') || /Enviado para calificar|Submitted for grading/i.test(html);
     }
     if (item.mod === 'quiz') {
-      const rows = [...doc.querySelectorAll('table.quizattemptsummary tbody tr')];
-      return rows.some((r) => /Finalizado|Finished/i.test(r.textContent));
+      const match = html.match(/<table[^>]*quizattemptsummary[\s\S]*?<\/table>/i);
+      return Boolean(match && /Finalizado|Finished/i.test(match[0]));
     }
     if (item.mod === 'forum') {
-      // Heurística: aparece tu perfil como autor en la lista de debates.
       if (!userId) return false;
       return new RegExp(`user/view\\.php\\?id=${userId}(?!\\d)`).test(html);
     }
