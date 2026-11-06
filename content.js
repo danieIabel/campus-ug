@@ -7,7 +7,9 @@
   const EVENT_TYPES = ['due', 'close']; // vencimiento (tareas/foros) y cierre (cuestionarios)
   const MONTHS_BACK = 3;
   const MONTHS_AHEAD = 2;
-  const FALSE_TTL = 10 * 60 * 1000; // no re-consultar "no entregada" antes de 10 min
+  const FALSE_TTL_RECENT = 10 * 60 * 1000; // 10 min para tareas recientes
+  const FALSE_TTL_OLD = 24 * 60 * 60 * 1000; // 24 h para vencidas hace > 15 días
+  const OLD_THRESHOLD = 15 * 24 * 60 * 60 * 1000;
   const STORE = 'tt_v1';
 
   const TABS = [
@@ -35,11 +37,25 @@
   const loadStore = async () => {
     try {
       const r = await chrome.storage.local.get(STORE);
-      if (r[STORE]) state.store = { auto: {}, manual: {}, ...r[STORE] };
+      if (r[STORE]) {
+        state.store = { auto: {}, manual: {}, ...r[STORE] };
+        if (Array.isArray(r[STORE].items) && r[STORE].items.length > 0) {
+          state.items = r[STORE].items;
+          state.loading = false;
+        }
+      }
     } catch (_) {}
   };
   const saveStore = () => {
-    try { chrome.storage.local.set({ [STORE]: state.store }); } catch (_) {}
+    try {
+      chrome.storage.local.set({
+        [STORE]: {
+          auto: state.store.auto,
+          manual: state.store.manual,
+          items: state.items,
+        },
+      });
+    } catch (_) {}
   };
 
   function getPageInfo() {
@@ -161,53 +177,106 @@
     return false;
   }
 
+  let resolving = false;
+
   async function resolveStatus(items) {
+    if (resolving) return;
+    resolving = true;
     const now = Date.now();
+
     const todo = items.filter((it) => {
       const c = state.store.auto[it.id];
-      if (c && c.done) return false; // entregada = permanente
-      if (c && now - c.t < FALSE_TTL) return false;
+      if (c && c.done) return false;
+      const isOld = now - it.due * 1000 > OLD_THRESHOLD;
+      const ttl = isOld ? FALSE_TTL_OLD : FALSE_TTL_RECENT;
+      if (c && now - c.t < ttl) return false;
       return true;
     });
+
+    if (todo.length === 0) {
+      state.progress = '';
+      render();
+      resolving = false;
+      return;
+    }
+
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+    todo.sort((a, b) => {
+      const score = (it) => {
+        const diff = it.due * 1000 - now;
+        if (diff >= 0 && diff <= SEVEN_DAYS) return 1;
+        if (diff < 0 && Math.abs(diff) <= OLD_THRESHOLD) return 2;
+        if (diff > SEVEN_DAYS) return 3;
+        return 4;
+      };
+      return score(a) - score(b);
+    });
+
     let n = 0;
+    state.progress = `Verificando entregas… (0/${todo.length})`;
+    render();
+
     await pool(todo, 3, async (it) => {
       try {
         state.store.auto[it.id] = { done: await checkDone(it), t: Date.now() };
       } catch (_) {}
-      state.progress = `Revisando estado de entrega… ${++n}/${todo.length}`;
-      if (n % 5 === 0) render();
+      n++;
+      state.progress = `Verificando entregas… (${n}/${todo.length})`;
+      if (n % 3 === 0 || n === todo.length) {
+        saveStore();
+        render();
+      }
     });
+
+    state.progress = '';
+    resolving = false;
     saveStore();
+    render();
   }
 
-  async function load() {
-    state.loading = true;
+  async function load({ deep = false } = {}) {
+    if (state.items.length === 0) {
+      state.loading = true;
+      state.progress = 'Cargando calendario…';
+      render();
+    } else {
+      state.progress = 'Sincronizando calendario…';
+      render();
+    }
     state.error = '';
-    state.progress = 'Cargando calendario…';
-    render();
+
     try {
       if (!sesskey) throw new Error('No se pudo leer la sesión de Moodle. Recarga la página.');
       const now = new Date();
       const months = [];
-      for (let o = -MONTHS_BACK; o <= MONTHS_AHEAD; o++) {
+      const back = deep ? MONTHS_BACK : 1;
+      const ahead = deep ? MONTHS_AHEAD : 1;
+      for (let o = -back; o <= ahead; o++) {
         const d = new Date(now.getFullYear(), now.getMonth() + o, 1);
         months.push([d.getFullYear(), d.getMonth() + 1]);
       }
       const events = await fetchMonths(months);
       const map = new Map();
+      if (!deep) {
+        state.items.forEach((it) => map.set(it.id, it));
+      }
       events.forEach((ev) => {
         const it = toItem(ev);
-        if (it && !map.has(it.id)) map.set(it.id, it);
+        if (it) map.set(it.id, it);
       });
       state.items = [...map.values()];
+      state.loading = false;
+      state.progress = '';
+      saveStore();
       render();
-      await resolveStatus(state.items);
+
+      resolveStatus(state.items);
     } catch (e) {
       state.error = e.message || String(e);
+      state.loading = false;
+      state.progress = '';
+      render();
     }
-    state.loading = false;
-    state.progress = '';
-    render();
   }
 
   /* ---------- clasificación ---------- */
@@ -375,7 +444,7 @@
       if (e.target.closest('[data-refresh]')) {
         state.store.auto = {};
         saveStore();
-        load();
+        load({ deep: true });
         return;
       }
       const tg = e.target.closest('[data-toggle]');
@@ -400,6 +469,7 @@
   (async () => {
     await loadStore();
     mount();
+    render();
     await load();
 
     let lastRender = Date.now();
